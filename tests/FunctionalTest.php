@@ -3,10 +3,10 @@
 namespace Clue\Tests\React\Soap;
 
 use Clue\React\Block;
-use Clue\React\Buzz\Browser;
 use Clue\React\Soap\Client;
 use Clue\React\Soap\Proxy;
 use PHPUnit\Framework\TestCase;
+use React\Http\Browser;
 
 class BankResponse
 {
@@ -29,12 +29,18 @@ class FunctionalTest extends TestCase
 
     // download WSDL file only once for all test cases
     private static $wsdl;
-    public static function setUpBeforeClass()
+    /**
+     * @beforeClass
+     */
+    public static function setUpFileBeforeClass()
     {
         self::$wsdl = file_get_contents('http://www.thomas-bayer.com/axis2/services/BLZService?wsdl');
     }
 
-    public function setUp()
+    /**
+     * @before
+     */
+    public function setUpClient()
     {
         $this->loop = \React\EventLoop\Factory::create();
         $this->client = new Client(new Browser($this->loop), self::$wsdl);
@@ -51,7 +57,7 @@ class FunctionalTest extends TestCase
 
         $result = Block\await($promise, $this->loop);
 
-        $this->assertInternalType('object', $result);
+        $this->assertIsObject($result);
         $this->assertTrue(isset($result->details));
         $this->assertTrue(isset($result->details->bic));
     }
@@ -93,7 +99,7 @@ class FunctionalTest extends TestCase
 
         $result = Block\await($promise, $this->loop);
 
-        $this->assertInternalType('object', $result);
+        $this->assertIsObject($result);
         $this->assertTrue(isset($result->details));
         $this->assertTrue(isset($result->details->bic));
     }
@@ -113,58 +119,48 @@ class FunctionalTest extends TestCase
 
         $result = Block\await($promise, $this->loop);
 
-        $this->assertInternalType('object', $result);
+        $this->assertIsObject($result);
         $this->assertFalse(isset($result->details));
         $this->assertTrue(isset($result->bic));
     }
 
-    /**
-     * @expectedException RuntimeException
-     * @expectedExeptionMessage redirects
-     */
     public function testBlzServiceWithRedirectLocationRejectsWithRuntimeException()
     {
         $this->client = new Client(new Browser($this->loop), null, array(
-            'location' => 'http://httpbin.org/redirect-to?url=' . rawurlencode('http://www.thomas-bayer.com/axis2/services/BLZService'),
+            'location' => 'http://httpbingo.org/redirect-to?url=' . rawurlencode('http://www.thomas-bayer.com/axis2/services/BLZService'),
             'uri' => 'http://thomas-bayer.com/blz/',
         ));
 
         $api = new Proxy($this->client);
         $promise = $api->getBank('a');
 
-        $result = Block\await($promise, $this->loop);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('redirects');
+        Block\await($promise, $this->loop);
     }
 
-    /**
-     * @expectedException SoapFault
-     * @expectedExeptionMessage Keine Bank zur BLZ invalid gefunden!
-     */
     public function testBlzServiceWithInvalidBlzRejectsWithSoapFault()
     {
         $api = new Proxy($this->client);
 
         $promise = $api->getBank(array('blz' => 'invalid'));
 
+        $this->expectException(\SoapFault::class);
+        $this->expectExceptionMessage('Keine Bank zur BLZ invalid gefunden!');
         Block\await($promise, $this->loop);
     }
 
-    /**
-     * @expectedException SoapFault
-     * @expectedExceptionMessage Function ("doesNotExist") is not a valid method for this service
-     */
     public function testBlzServiceWithInvalidMethodRejectsWithSoapFault()
     {
         $api = new Proxy($this->client);
 
         $promise = $api->doesNotExist();
 
+        $this->expectException(\SoapFault::class);
+        $this->expectExceptionMessage('Function ("doesNotExist") is not a valid method for this service');
         Block\await($promise, $this->loop);
     }
 
-    /**
-     * @expectedException RuntimeException
-     * @expectedExceptionMessage cancelled
-     */
     public function testCancelMethodRejectsWithRuntimeException()
     {
         $api = new Proxy($this->client);
@@ -172,25 +168,23 @@ class FunctionalTest extends TestCase
         $promise = $api->getBank(array('blz' => '12070000'));
         $promise->cancel();
 
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('cancelled');
         Block\await($promise, $this->loop);
     }
 
-    /**
-     * @expectedException RuntimeException
-     * @expectedExceptionMessage timed out
-     */
     public function testTimeoutRejectsWithRuntimeException()
     {
         $browser = new Browser($this->loop);
-        $browser = $browser->withOptions(array(
-            'timeout' => 0
-        ));
+        $browser = $browser->withTimeout(0);
 
         $this->client = new Client($browser, self::$wsdl);
         $api = new Proxy($this->client);
 
         $promise = $api->getBank(array('blz' => '12070000'));
 
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('timed out');
         Block\await($promise, $this->loop);
     }
 
@@ -205,19 +199,15 @@ class FunctionalTest extends TestCase
         $this->assertEquals('http://www.thomas-bayer.com/axis2/services/BLZService', $this->client->getLocation(0));
     }
 
-    /**
-     * @expectedException SoapFault
-     */
     public function testGetLocationOfUnknownFunctionNameFails()
     {
+        $this->expectException(\SoapFault::class);
         $this->client->getLocation('unknown');
     }
 
-    /**
-     * @expectedException SoapFault
-     */
     public function testGetLocationForUnknownFunctionNumberFails()
     {
+        $this->expectException(\SoapFault::class);
         $this->assertEquals('http://www.thomas-bayer.com/axis2/services/BLZService', $this->client->getLocation(100));
     }
 
@@ -239,15 +229,13 @@ class FunctionalTest extends TestCase
         $this->assertEquals($original, $this->client->getLocation(0));
     }
 
-    /**
-     * @expectedException RuntimeException
-     */
     public function testWithLocationInvalidRejectsWithRuntimeException()
     {
         $api = new Proxy($this->client->withLocation('http://nonsense.invalid'));
 
         $promise = $api->getBank(array('blz' => '12070000'));
 
+        $this->expectException(\RuntimeException::class);
         Block\await($promise, $this->loop);
     }
 
@@ -261,6 +249,6 @@ class FunctionalTest extends TestCase
         $promise = $api->getBank(array('blz' => '12070000'));
 
         $result = Block\await($promise, $this->loop);
-        $this->assertInternalType('object', $result);
+        $this->assertIsObject($result);
     }
 }
